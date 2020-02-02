@@ -1,0 +1,5 @@
+name: BukkitBrigadier
+version: ${project.version}
+main: me.inshin.bukkitbrigadier.BukkitBrigadierPlugin
+authors: [InShin]
+description: a bukkit lib
