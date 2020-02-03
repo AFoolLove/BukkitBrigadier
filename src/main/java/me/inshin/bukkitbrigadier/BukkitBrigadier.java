@@ -6,11 +6,14 @@ package me.inshin.bukkitbrigadier;
 
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.suggestion.SuggestionProvider;
 import com.mojang.brigadier.tree.CommandNode;
 import com.mojang.brigadier.tree.RootCommandNode;
 import org.bukkit.Bukkit;
 import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -18,6 +21,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Map;
+import java.util.function.Predicate;
 
 public class BukkitBrigadier {
     private static final Class<?> MC_SERVER_CLAZZ;
@@ -34,6 +38,7 @@ public class BukkitBrigadier {
 
     /**
      * 注册命令
+     *
      * @param builder 命令构建器
      */
     public static void register(@NotNull LiteralArgumentBuilder<Object> builder) {
@@ -45,6 +50,7 @@ public class BukkitBrigadier {
 
     /**
      * 注销命令
+     *
      * @param cmd 要注销的命令
      */
     public static void unregister(@NotNull String cmd) {
@@ -62,6 +68,7 @@ public class BukkitBrigadier {
 
     /**
      * 批量注销命令
+     *
      * @param commands 要注销的命令
      */
     public static void unregisters(@NotNull String... commands) {
@@ -89,37 +96,46 @@ public class BukkitBrigadier {
 
     /**
      * 创建一个命令解析器，只能转换为 {@link org.bukkit.entity.Entity} 能转换的类
-     * @param clazz 要转换的类
-     * @param object 命令
-     * @param <T> 类泛型
+     *
+     * @param clazz    要转换的类
+     * @param executes 命令
+     * @param <T>      类泛型
      * @return 命令
      */
     @NotNull
-    public static <T> Command<Object> executes(@NotNull final Class<T> clazz, @NotNull final IBukkitBrigadierExecutes<T> object) {
+    public static <T> Command<Object> executes(@NotNull final Class<T> clazz, @NotNull final IBukkitBrigadierExecutes<T> executes) {
         return context -> {
             try {
-                Object entity = context.getSource().getClass().getMethod("getEntity").invoke(context.getSource());
+                Class<?> sourceClazz = context.getSource().getClass();
+                if (clazz == CommandSender.class) {
+                    Object bukkitSender = sourceClazz.getMethod("getBukkitSender").invoke(context.getSource());
+                    if (bukkitSender instanceof CommandSender) {
+                        return executes.run(context, clazz.cast(bukkitSender));
+                    }
+                }
+                Object entity = sourceClazz.getMethod("getEntity").invoke(context.getSource());
                 if (entity != null) {
                     Object bukkitEntity = entity.getClass().getMethod("getBukkitEntity").invoke(entity);
                     if (clazz.isAssignableFrom(bukkitEntity.getClass())) {
-                        return object.run(context, clazz.cast(bukkitEntity));
+                        return executes.run(context, clazz.cast(bukkitEntity));
                     }
                 }
             } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
                 e.printStackTrace();
             }
-            return object.run(context, null);
+            return executes.run(context, null);
         };
     }
 
     /**
      * 创建一个能直接调用 CommandSender 的命令解析器
-     * @param sender 命令
+     *
+     * @param executes 命令
      * @return 命令
      */
     @NotNull
-    public static Command<Object> senderExecutes(@NotNull final IBukkitBrigadierExecutes<CommandSender> sender) {
-        return executes(CommandSender.class, sender);
+    public static Command<Object> senderExecutes(@NotNull final IBukkitBrigadierExecutes<CommandSender> executes) {
+        return executes(CommandSender.class, executes);
     }
 
     @Nullable
@@ -148,4 +164,15 @@ public class BukkitBrigadier {
             ((Map) object).remove(cmd);
         }
     }
+
+//    public static class Permission {
+//        public static <T> Predicate<T> permissions(@NotNull String... permissions){
+//            return t -> {
+//
+//                for (String permission : permissions) {
+//
+//                }
+//            };
+//        }
+//    }
 }
