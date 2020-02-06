@@ -5,93 +5,34 @@
 package me.inshin.bukkitbrigadier;
 
 import com.mojang.brigadier.Command;
-import com.mojang.brigadier.CommandDispatcher;
-import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
-import com.mojang.brigadier.suggestion.SuggestionProvider;
-import com.mojang.brigadier.tree.CommandNode;
-import com.mojang.brigadier.tree.RootCommandNode;
-import org.bukkit.Bukkit;
+import com.mojang.brigadier.context.CommandContext;
 import org.bukkit.command.CommandSender;
-import org.bukkit.entity.Player;
+import org.bukkit.entity.Entity;
+import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.util.Map;
-import java.util.function.Predicate;
+import java.util.Collection;
 
 public class BukkitBrigadier {
-    private static final Class<?> MC_SERVER_CLAZZ;
-
-    static {
-        try {
-            Class<?> serverClazz = Bukkit.getServer().getClass();
-            String mcServerClazzName = serverClazz.getPackage().getName().replaceFirst("org.bukkit.craftbukkit", "net.minecraft.server") + ".MinecraftServer";
-            MC_SERVER_CLAZZ = serverClazz.getClassLoader().loadClass(mcServerClazzName);
-        } catch (ClassNotFoundException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
     /**
      * 注册命令
      *
-     * @param builder 命令构建器
+     * @param builders 命令构建器
      */
-    public static void register(@NotNull LiteralArgumentBuilder<Object> builder) {
-        CommandDispatcher<Object> commandDispatcher = getCommandDispatcher();
-        if (commandDispatcher != null) {
-            commandDispatcher.register(builder);
-        }
+    public static <T extends JavaPlugin> void registers(@NotNull Class<T> pluginClazz, @NotNull Collection<LiteralArgumentBuilder<Object>> builders) {
+        BrigadierManager.addRootCommands(pluginClazz, null, builders);
     }
 
     /**
      * 注销命令
      *
-     * @param cmd 要注销的命令
+     * @param pluginClazz 要注销的命令的插件
      */
-    public static void unregister(@NotNull String cmd) {
-        CommandDispatcher<Object> commandDispatcher = getCommandDispatcher();
-        if (commandDispatcher != null) {
-            try {
-                removeCommand(commandDispatcher.getRoot(), "children", cmd);
-                removeCommand(commandDispatcher.getRoot(), "literals", cmd);
-                removeCommand(commandDispatcher.getRoot(), "arguments", cmd);
-            } catch (NoSuchFieldException | IllegalAccessException e) {
-//                e.printStackTrace();
-            }
-        }
-    }
-
-    /**
-     * 批量注销命令
-     *
-     * @param commands 要注销的命令
-     */
-    public static void unregisters(@NotNull String... commands) {
-        if (commands.length == 0) {
-            return;
-        }
-        if (commands.length == 1) {
-            unregister(commands[0]);
-            return;
-        }
-
-        CommandDispatcher<Object> commandDispatcher = getCommandDispatcher();
-        if (commandDispatcher != null) {
-            try {
-                for (String command : commands) {
-                    removeCommand(commandDispatcher.getRoot(), "children", command);
-                    removeCommand(commandDispatcher.getRoot(), "literals", command);
-                    removeCommand(commandDispatcher.getRoot(), "arguments", command);
-                }
-            } catch (NoSuchFieldException | IllegalAccessException e) {
-                e.printStackTrace();
-            }
-        }
+    public static <T extends JavaPlugin> void unregisters(@NotNull Class<T> pluginClazz) {
+        BrigadierManager.removeRootCommands(pluginClazz);
     }
 
     /**
@@ -105,23 +46,15 @@ public class BukkitBrigadier {
     @NotNull
     public static <T> Command<Object> executes(@NotNull final Class<T> clazz, @NotNull final IBukkitBrigadierExecutes<T> executes) {
         return context -> {
-            try {
-                Class<?> sourceClazz = context.getSource().getClass();
-                if (clazz == CommandSender.class) {
-                    Object bukkitSender = sourceClazz.getMethod("getBukkitSender").invoke(context.getSource());
-                    if (bukkitSender instanceof CommandSender) {
-                        return executes.run(context, clazz.cast(bukkitSender));
-                    }
+            if (clazz == CommandSender.class) {
+                CommandSender sender = getContextSender(context);
+                if (sender != null) {
+                    return executes.run(context, clazz.cast(sender));
                 }
-                Object entity = sourceClazz.getMethod("getEntity").invoke(context.getSource());
-                if (entity != null) {
-                    Object bukkitEntity = entity.getClass().getMethod("getBukkitEntity").invoke(entity);
-                    if (clazz.isAssignableFrom(bukkitEntity.getClass())) {
-                        return executes.run(context, clazz.cast(bukkitEntity));
-                    }
-                }
-            } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
-                e.printStackTrace();
+            }
+            Entity entity = getContextEntity(context);
+            if (entity != null && clazz.isAssignableFrom(entity.getClass())) {
+                return executes.run(context, clazz.cast(entity));
             }
             return executes.run(context, null);
         };
@@ -138,17 +71,21 @@ public class BukkitBrigadier {
         return executes(CommandSender.class, executes);
     }
 
-    @Nullable
-    private static CommandDispatcher<Object> getCommandDispatcher() {
+    /**
+     * 获取到执行命令的实体
+     * 在 suggests 中也能获取到
+     *
+     * @param context Context
+     * @return 执行命令的实体
+     */
+    public static Entity getContextEntity(@NotNull CommandContext<Object> context) {
+        Class<?> sourceClazz = context.getSource().getClass();
         try {
-            Object mcServer = Bukkit.getServer().getClass().getMethod("getServer").invoke(Bukkit.getServer());
-            Object mcCommandDispatcher = MC_SERVER_CLAZZ.getMethod("getCommandDispatcher").invoke(mcServer);
-
-            Class<?> mcCommandDispatcherClazz = mcCommandDispatcher.getClass();
-            for (Method method : mcCommandDispatcherClazz.getDeclaredMethods()) {
-                if (method.getReturnType().isAssignableFrom(CommandDispatcher.class)) {
-                    return (CommandDispatcher<Object>) method.invoke(mcCommandDispatcher);
-                }
+            // object net.minecraft.server.v1_15_R1.CommandListenerWrapper#getEntity
+            Object entity = sourceClazz.getMethod("getEntity").invoke(context.getSource());
+            if (entity != null) {
+                // object net.minecraft.server.v1_15_R1.Entity#getBukkitEntity
+                return (Entity) entity.getClass().getMethod("getBukkitEntity").invoke(entity);
             }
         } catch (IllegalAccessException | InvocationTargetException | NoSuchMethodException e) {
             e.printStackTrace();
@@ -156,23 +93,48 @@ public class BukkitBrigadier {
         return null;
     }
 
-    private static void removeCommand(RootCommandNode<Object> root, String name, String cmd) throws NoSuchFieldException, IllegalAccessException {
-        Field field = CommandNode.class.getDeclaredField(name);
-        field.setAccessible(true);
-        Object object = field.get(root);
-        if (object instanceof Map) {
-            ((Map) object).remove(cmd);
+    /**
+     * 获取到命令发送者
+     * 在 suggests 中也能获取到
+     *
+     * @param context Context
+     * @return 命令发送者
+     */
+    public static CommandSender getContextSender(@NotNull CommandContext<Object> context) {
+        try {
+            Class<?> sourceClazz = context.getSource().getClass();
+            // object net.minecraft.server.v1_15_R1.CommandListenerWrapper#getBukkitSender
+            Object bukkitSender = sourceClazz.getMethod("getBukkitSender").invoke(context.getSource());
+            if (bukkitSender instanceof CommandSender) {
+                return (CommandSender) bukkitSender;
+            }
+        } catch (IllegalAccessException | InvocationTargetException | NoSuchMethodException e) {
+            e.printStackTrace();
         }
+        return null;
     }
 
-//    public static class Permission {
-//        public static <T> Predicate<T> permissions(@NotNull String... permissions){
-//            return t -> {
-//
-//                for (String permission : permissions) {
-//
-//                }
-//            };
-//        }
-//    }
+    /**
+     * 获取参数的值，并转换成指定的类型
+     * <p>
+     * 说实话这个挺糟糕的，在原方法中
+     * 参数还没有值（玩家正打算输入）的时候，这时获取参数值无效（玩家还没输入，还是空的）就会直接抛出异常
+     * 还不给判断有没有的方法，我当时就***了
+     *
+     * @param context Context
+     * @param name    参数名
+     * @param def     未获取到时返回的值
+     * @param clazz   参数值的类型
+     * @return 参数的值
+     */
+    public static <T> T getContextArgument(@NotNull CommandContext<Object> context, @NotNull String name, @Nullable T def, Class<T> clazz) {
+        try {
+            return context.getArgument(name, clazz);
+        } catch (IllegalArgumentException e) {
+            if (!e.getMessage().startsWith("No such argument")) {
+                e.printStackTrace();
+            }
+        }
+        return def;
+    }
 }

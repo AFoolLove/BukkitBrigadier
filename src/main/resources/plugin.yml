@@ -2,4 +2,13 @@ name: BukkitBrigadier
 version: ${project.version}
 main: me.inshin.bukkitbrigadier.BukkitBrigadierPlugin
 authors: [InShin]
+api-version: '1.13'
 description: a bukkit lib
+
+commands:
+  bar:
+    usage: /bar
+    description: a bar command
+  foo:
+    usage: /foo
+    description: a oo command
