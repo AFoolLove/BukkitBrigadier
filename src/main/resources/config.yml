@@ -1,0 +1,14 @@
+# version 0
+# ！！！配置文件未使用！！！
+
+debug-log: false
+
+# 当注册和注销命令时，是否给已连接的玩家更新命令列表
+# 如果不发送，客户端会保留提示命令，但无法执行
+sync-commands:
+  # 注册新命令时
+  register: true
+  # 注销命令时
+  unregister: false
+
+

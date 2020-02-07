@@ -15,6 +15,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.InvocationTargetException;
 import java.util.Collection;
+import java.util.Optional;
 
 public class BukkitBrigadier {
     /**
@@ -47,16 +48,13 @@ public class BukkitBrigadier {
     public static <T> Command<Object> executes(@NotNull final Class<T> clazz, @NotNull final IBukkitBrigadierExecutes<T> executes) {
         return context -> {
             if (clazz == CommandSender.class) {
-                CommandSender sender = getContextSender(context);
-                if (sender != null) {
-                    return executes.run(context, clazz.cast(sender));
-                }
+                return executes.run(context, (Optional<T>) getContextSender(context));
             }
-            Entity entity = getContextEntity(context);
-            if (entity != null && clazz.isAssignableFrom(entity.getClass())) {
-                return executes.run(context, clazz.cast(entity));
+            Optional<Entity> contextEntity = getContextEntity(context);
+            if (contextEntity.isPresent()) {
+                return executes.run(context, (Optional<T>) contextEntity);
             }
-            return executes.run(context, null);
+            return executes.run(context, Optional.empty());
         };
     }
 
@@ -68,7 +66,7 @@ public class BukkitBrigadier {
      */
     @NotNull
     public static Command<Object> senderExecutes(@NotNull final IBukkitBrigadierExecutes<CommandSender> executes) {
-        return executes(CommandSender.class, executes);
+        return context -> executes.run(context, getContextSender(context));
     }
 
     /**
@@ -78,19 +76,19 @@ public class BukkitBrigadier {
      * @param context Context
      * @return 执行命令的实体
      */
-    public static Entity getContextEntity(@NotNull CommandContext<Object> context) {
+    public static Optional<Entity> getContextEntity(@NotNull CommandContext<Object> context) {
         Class<?> sourceClazz = context.getSource().getClass();
         try {
             // object net.minecraft.server.v1_15_R1.CommandListenerWrapper#getEntity
             Object entity = sourceClazz.getMethod("getEntity").invoke(context.getSource());
-            if (entity != null) {
+            if (entity instanceof Entity) {
                 // object net.minecraft.server.v1_15_R1.Entity#getBukkitEntity
-                return (Entity) entity.getClass().getMethod("getBukkitEntity").invoke(entity);
+                return Optional.ofNullable((Entity) entity.getClass().getMethod("getBukkitEntity").invoke(entity));
             }
         } catch (IllegalAccessException | InvocationTargetException | NoSuchMethodException e) {
             e.printStackTrace();
         }
-        return null;
+        return Optional.empty();
     }
 
     /**
@@ -100,18 +98,19 @@ public class BukkitBrigadier {
      * @param context Context
      * @return 命令发送者
      */
-    public static CommandSender getContextSender(@NotNull CommandContext<Object> context) {
+    @NotNull
+    public static Optional<CommandSender> getContextSender(@NotNull CommandContext<Object> context) {
         try {
             Class<?> sourceClazz = context.getSource().getClass();
             // object net.minecraft.server.v1_15_R1.CommandListenerWrapper#getBukkitSender
             Object bukkitSender = sourceClazz.getMethod("getBukkitSender").invoke(context.getSource());
             if (bukkitSender instanceof CommandSender) {
-                return (CommandSender) bukkitSender;
+                return Optional.of((CommandSender) bukkitSender);
             }
         } catch (IllegalAccessException | InvocationTargetException | NoSuchMethodException e) {
             e.printStackTrace();
         }
-        return null;
+        return Optional.empty();
     }
 
     /**
@@ -123,18 +122,17 @@ public class BukkitBrigadier {
      *
      * @param context Context
      * @param name    参数名
-     * @param def     未获取到时返回的值
      * @param clazz   参数值的类型
      * @return 参数的值
      */
-    public static <T> T getContextArgument(@NotNull CommandContext<Object> context, @NotNull String name, @Nullable T def, Class<T> clazz) {
+    public static <T> Optional<T> getContextArgument(@NotNull CommandContext<Object> context, @NotNull String name, Class<T> clazz) {
         try {
-            return context.getArgument(name, clazz);
+            return Optional.of(context.getArgument(name, clazz));
         } catch (IllegalArgumentException e) {
             if (!e.getMessage().startsWith("No such argument")) {
                 e.printStackTrace();
             }
         }
-        return def;
+        return Optional.empty();
     }
 }
